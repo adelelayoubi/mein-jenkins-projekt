@@ -12,7 +12,8 @@
  * Laufzeit: Node.js + Express
  * Deployment: Docker / CI-CD Pipeline
  *
- * GET  /            -> GUI (HTML) mit Buttons und Ergebnis-Feld
+ * GET  /            -> GUI (HTML) mit Überschrift, Buttons, Ergebnis-Feld,
+ *                       Größenänderung per Maus und letzter Berechnung
  * GET  /health      -> Health-Check für Docker
  * POST /calculate   -> Berechnungs-API (JSON)
  * GET  /:operator   -> Berechnungs-API Shortcut (JSON, Query-Params a, b)
@@ -167,21 +168,52 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
 <title>Taschenrechner</title>
 <style>
   * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
   body {
     font-family: Arial, Helvetica, sans-serif;
     background: #2b2b2b;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100vh;
-    margin: 0;
+    min-height: 100vh;
+    gap: 16px;
   }
+  h1#app-title {
+    color: #fff;
+    font-size: 24px;
+    margin: 0;
+    letter-spacing: 1px;
+  }
+  /* Resizable Wrapper: per Maus an der unteren rechten Ecke ziehen */
   .calculator {
+    position: relative;
     background: #1e1e1e;
     padding: 20px;
     border-radius: 12px;
     box-shadow: 0 8px 20px rgba(0,0,0,0.5);
-    width: 300px;
+    width: 320px;
+    height: 480px;
+    min-width: 260px;
+    min-height: 400px;
+    max-width: 700px;
+    max-height: 900px;
+    resize: both;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .expression-line {
+    color: #9a9a9a;
+    font-size: calc(0.9em);
+    text-align: right;
+    min-height: 18px;
+    padding: 0 4px;
+    overflow-x: auto;
+    white-space: nowrap;
   }
   #result-field {
     width: 100%;
@@ -197,14 +229,17 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
     box-sizing: border-box;
     overflow-x: auto;
     white-space: nowrap;
+    flex-shrink: 0;
   }
   .buttons {
+    flex: 1;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(5, 1fr);
     gap: 10px;
   }
   button {
-    padding: 18px 0;
+    padding: 0;
     font-size: 18px;
     border: none;
     border-radius: 8px;
@@ -225,13 +260,37 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
     font-size: 13px;
     min-height: 16px;
     text-align: right;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
+  }
+  #last-memory {
+    color: #8f8f8f;
+    font-size: 12px;
+    text-align: center;
+    min-height: 16px;
+    width: 320px;
+    max-width: 90vw;
+  }
+  #last-memory span {
+    color: #cfcfcf;
+    font-weight: bold;
+  }
+  .resize-hint {
+    position: absolute;
+    bottom: 4px;
+    right: 6px;
+    color: #555;
+    font-size: 10px;
+    pointer-events: none;
+    user-select: none;
   }
 </style>
 </head>
 <body>
-  <div class="calculator">
+  <h1 id="app-title">Taschenrechner</h1>
+
+  <div class="calculator" id="calculator">
     <div id="error-message"></div>
+    <div class="expression-line" id="expression-line">&nbsp;</div>
     <input id="result-field" type="text" value="0" readonly>
     <div class="buttons">
       <button class="clear" onclick="Calculator.clear()">C</button>
@@ -257,7 +316,10 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
       <button onclick="Calculator.appendDigit('.')">.</button>
       <button class="equals" onclick="Calculator.evaluate()">=</button>
     </div>
+    <div class="resize-hint">⇲ ziehen zum Skalieren</div>
   </div>
+
+  <div id="last-memory">Letzte Berechnung: <span id="last-memory-value">–</span></div>
 
 <script>
   /**
@@ -268,15 +330,30 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
    * Java-Controller-Klasse mit gekapseltem State.
    */
   const Calculator = (() => {
+      const OPERATOR_SYMBOLS = {
+          add: '+',
+          subtract: '−',
+          multiply: '×',
+          divide: '÷'
+      };
+
       let currentValue = '0';
       let pendingOperand = null;
       let pendingOperator = null;
 
       const resultField = document.getElementById('result-field');
       const errorMessage = document.getElementById('error-message');
+      const expressionLine = document.getElementById('expression-line');
+      const lastMemoryValue = document.getElementById('last-memory-value');
 
       function render() {
           resultField.value = currentValue;
+
+          if (pendingOperator !== null) {
+              expressionLine.textContent = pendingOperand + ' ' + OPERATOR_SYMBOLS[pendingOperator] + ' ' + currentValue;
+          } else {
+              expressionLine.innerHTML = '&nbsp;';
+          }
       }
 
       function showError(message) {
@@ -315,6 +392,7 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
           pendingOperand = parseFloat(currentValue);
           pendingOperator = operator;
           currentValue = '0';
+          render();
       }
 
       async function evaluate() {
@@ -322,6 +400,7 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
               return;
           }
           const secondOperand = parseFloat(currentValue);
+          const expressionText = pendingOperand + ' ' + OPERATOR_SYMBOLS[pendingOperator] + ' ' + secondOperand;
 
           try {
               const response = await fetch('/calculate', {
@@ -340,6 +419,8 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
                   throw new Error(data.error || 'Unbekannter Fehler.');
               }
 
+              lastMemoryValue.textContent = expressionText + ' = ' + data.result;
+
               currentValue = String(data.result);
               pendingOperand = null;
               pendingOperator = null;
@@ -350,6 +431,31 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
       }
 
       return { appendDigit, backspace, clear, setOperator, evaluate };
+  })();
+
+  /**
+   * ResizeScaler
+   *
+   * Beobachtet die per Maus veränderte Größe des Taschenrechners
+   * (CSS resize: both) und skaliert Schriftgrößen proportional mit,
+   * damit Buttons und Anzeige beim Vergrößern/Verkleinern mitwachsen.
+   */
+  (function initResizeScaler() {
+      const calculatorElement = document.getElementById('calculator');
+      const resultField = document.getElementById('result-field');
+      const buttons = calculatorElement.querySelectorAll('button');
+
+      const resizeObserver = new ResizeObserver((entries) => {
+          for (const entry of entries) {
+              const width = entry.contentRect.width;
+              resultField.style.fontSize = Math.max(16, width / 11) + 'px';
+              buttons.forEach((button) => {
+                  button.style.fontSize = Math.max(12, width / 18) + 'px';
+              });
+          }
+      });
+
+      resizeObserver.observe(calculatorElement);
   })();
 </script>
 </body>
