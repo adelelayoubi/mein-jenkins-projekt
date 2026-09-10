@@ -1,7 +1,7 @@
 /**
  * server.js
  *
- * Taschenrechner-Server (Calculator Server)
+ * Taschenrechner-Server (Calculator Server) mit grafischer Oberfläche
  *
  * Implementiert nach Java-ähnlichen Konventionen:
  *  - Klassenbasierte Kapselung der Geschäftslogik (CalculatorService)
@@ -11,6 +11,11 @@
  *
  * Laufzeit: Node.js + Express
  * Deployment: Docker / CI-CD Pipeline
+ *
+ * GET  /            -> GUI (HTML) mit Buttons und Ergebnis-Feld
+ * GET  /health      -> Health-Check für Docker
+ * POST /calculate   -> Berechnungs-API (JSON)
+ * GET  /:operator   -> Berechnungs-API Shortcut (JSON, Query-Params a, b)
  */
 
 'use strict';
@@ -32,7 +37,6 @@ const PORT = process.env.PORT || DEFAULT_PORT;
  */
 class CalculatorService {
     /**
-     * Addiert zwei Zahlen.
      * @param {number} a
      * @param {number} b
      * @returns {number}
@@ -42,7 +46,6 @@ class CalculatorService {
     }
 
     /**
-     * Subtrahiert b von a.
      * @param {number} a
      * @param {number} b
      * @returns {number}
@@ -52,7 +55,6 @@ class CalculatorService {
     }
 
     /**
-     * Multipliziert zwei Zahlen.
      * @param {number} a
      * @param {number} b
      * @returns {number}
@@ -62,7 +64,6 @@ class CalculatorService {
     }
 
     /**
-     * Dividiert a durch b.
      * @param {number} a
      * @param {number} b
      * @returns {number}
@@ -77,7 +78,6 @@ class CalculatorService {
 
     /**
      * Führt die Operation anhand des übergebenen Operator-Strings aus.
-     * Vergleichbar mit einem switch-case Dispatch in Java.
      *
      * @param {string} operator - einer von: add, subtract, multiply, divide
      * @param {number} a
@@ -125,8 +125,6 @@ class CalculationException extends Error {
  */
 class InputValidator {
     /**
-     * Validiert, dass der übergebene Wert eine gültige, endliche Zahl ist.
-     *
      * @param {*} value
      * @param {string} fieldName
      * @returns {number}
@@ -141,8 +139,6 @@ class InputValidator {
     }
 
     /**
-     * Validiert, dass ein Operator vorhanden und unterstützt ist.
-     *
      * @param {*} operator
      * @returns {string}
      * @throws {CalculationException}
@@ -159,11 +155,220 @@ class InputValidator {
 }
 
 /* -----------------------------------------------------------------------
+ * View-Layer: HTML/CSS/JS für die GUI als einzelner String.
+ * (In Java wäre dies z. B. eine Thymeleaf-Template-Datei; hier aus
+ * Gründen der Single-File-Vorgabe direkt im Server eingebettet.)
+ * --------------------------------------------------------------------- */
+
+const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Taschenrechner</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #2b2b2b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .calculator {
+    background: #1e1e1e;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+    width: 300px;
+  }
+  #result-field {
+    width: 100%;
+    height: 60px;
+    background: #000;
+    color: #fff;
+    font-size: 28px;
+    text-align: right;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 15px;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .buttons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  button {
+    padding: 18px 0;
+    font-size: 18px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #3a3a3a;
+    color: #fff;
+    transition: background 0.15s ease;
+  }
+  button:hover { background: #4a4a4a; }
+  button.operator { background: #ff9500; }
+  button.operator:hover { background: #ffab33; }
+  button.equals { background: #34c759; grid-column: span 2; }
+  button.equals:hover { background: #4fd873; }
+  button.clear { background: #d84343; }
+  button.clear:hover { background: #e85c5c; }
+  #error-message {
+    color: #ff6b6b;
+    font-size: 13px;
+    min-height: 16px;
+    text-align: right;
+    margin-bottom: 6px;
+  }
+</style>
+</head>
+<body>
+  <div class="calculator">
+    <div id="error-message"></div>
+    <input id="result-field" type="text" value="0" readonly>
+    <div class="buttons">
+      <button class="clear" onclick="Calculator.clear()">C</button>
+      <button onclick="Calculator.backspace()">⌫</button>
+      <button class="operator" onclick="Calculator.setOperator('divide')">÷</button>
+      <button class="operator" onclick="Calculator.setOperator('multiply')">×</button>
+
+      <button onclick="Calculator.appendDigit('7')">7</button>
+      <button onclick="Calculator.appendDigit('8')">8</button>
+      <button onclick="Calculator.appendDigit('9')">9</button>
+      <button class="operator" onclick="Calculator.setOperator('subtract')">−</button>
+
+      <button onclick="Calculator.appendDigit('4')">4</button>
+      <button onclick="Calculator.appendDigit('5')">5</button>
+      <button onclick="Calculator.appendDigit('6')">6</button>
+      <button class="operator" onclick="Calculator.setOperator('add')">+</button>
+
+      <button onclick="Calculator.appendDigit('1')">1</button>
+      <button onclick="Calculator.appendDigit('2')">2</button>
+      <button onclick="Calculator.appendDigit('3')">3</button>
+      <button onclick="Calculator.appendDigit('0')" style="grid-row: span 2;">0</button>
+
+      <button onclick="Calculator.appendDigit('.')">.</button>
+      <button class="equals" onclick="Calculator.evaluate()">=</button>
+    </div>
+  </div>
+
+<script>
+  /**
+   * Calculator (Frontend-Controller)
+   *
+   * Kapselt den GUI-State und kommuniziert mit dem Backend
+   * über den /calculate Endpoint. Aufbau angelehnt an eine
+   * Java-Controller-Klasse mit gekapseltem State.
+   */
+  const Calculator = (() => {
+      let currentValue = '0';
+      let pendingOperand = null;
+      let pendingOperator = null;
+
+      const resultField = document.getElementById('result-field');
+      const errorMessage = document.getElementById('error-message');
+
+      function render() {
+          resultField.value = currentValue;
+      }
+
+      function showError(message) {
+          errorMessage.textContent = message;
+      }
+
+      function clearError() {
+          errorMessage.textContent = '';
+      }
+
+      function appendDigit(digit) {
+          clearError();
+          if (digit === '.' && currentValue.includes('.')) {
+              return;
+          }
+          currentValue = currentValue === '0' && digit !== '.' ? digit : currentValue + digit;
+          render();
+      }
+
+      function backspace() {
+          clearError();
+          currentValue = currentValue.length > 1 ? currentValue.slice(0, -1) : '0';
+          render();
+      }
+
+      function clear() {
+          clearError();
+          currentValue = '0';
+          pendingOperand = null;
+          pendingOperator = null;
+          render();
+      }
+
+      function setOperator(operator) {
+          clearError();
+          pendingOperand = parseFloat(currentValue);
+          pendingOperator = operator;
+          currentValue = '0';
+      }
+
+      async function evaluate() {
+          if (pendingOperator === null || pendingOperand === null) {
+              return;
+          }
+          const secondOperand = parseFloat(currentValue);
+
+          try {
+              const response = await fetch('/calculate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                      operator: pendingOperator,
+                      a: pendingOperand,
+                      b: secondOperand
+                  })
+              });
+
+              const data = await response.json();
+
+              if (!response.ok) {
+                  throw new Error(data.error || 'Unbekannter Fehler.');
+              }
+
+              currentValue = String(data.result);
+              pendingOperand = null;
+              pendingOperator = null;
+              render();
+          } catch (error) {
+              showError(error.message);
+          }
+      }
+
+      return { appendDigit, backspace, clear, setOperator, evaluate };
+  })();
+</script>
+</body>
+</html>`;
+
+/* -----------------------------------------------------------------------
  * Express-Anwendung / Controller-Layer (analog zu @RestController in Java)
  * --------------------------------------------------------------------- */
 
 const app = express();
 app.use(express.json());
+
+/**
+ * GUI-Endpoint: liefert die HTML-Oberfläche des Taschenrechners aus.
+ * GET /
+ */
+app.get('/', (req, res) => {
+    res.status(200).type('html').send(CALCULATOR_HTML_PAGE);
+});
 
 /**
  * Health-Check-Endpoint.
@@ -200,10 +405,10 @@ app.post('/calculate', (req, res, next) => {
 });
 
 /**
- * Bequemlichkeits-Endpoints via GET, z. B. /add?a=2&b=3
+ * Bequemlichkeits-Endpoint via GET, z. B. /add?a=2&b=3
  * Analog zu zusätzlichen @GetMapping-Routen in Java.
  */
-app.get('/:operator', (req, res, next) => {
+app.get('/:operator(add|subtract|multiply|divide)', (req, res, next) => {
     try {
         const { operator } = req.params;
         const { a, b } = req.query;
@@ -224,20 +429,7 @@ app.get('/:operator', (req, res, next) => {
         next(error);
     }
 });
-/**
- * Root-Endpoint mit kurzer API-Übersicht.
- * GET /
- */
-app.get('/', (req, res) => {
-    res.status(200).json({
-        service: 'Taschenrechner-Server',
-        endpoints: {
-            health: 'GET /health',
-            calculate: 'POST /calculate  { "operator": "add", "a": 2, "b": 3 }',
-            shortcuts: 'GET /add|subtract|multiply|divide?a=2&b=3'
-        }
-    });
-});
+
 /**
  * 404-Handler für nicht existierende Routen.
  */
