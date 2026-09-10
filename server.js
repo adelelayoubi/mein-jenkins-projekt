@@ -408,7 +408,7 @@ app.post('/calculate', (req, res, next) => {
  * Bequemlichkeits-Endpoint via GET, z. B. /add?a=2&b=3
  * Analog zu zusätzlichen @GetMapping-Routen in Java.
  */
-app.get('/:operator(add|subtract|multiply|divide)', (req, res, next) => {
+app.get('/:operator', (req, res, next) => {
     try {
         const { operator } = req.params;
         const { a, b } = req.query;
