@@ -224,7 +224,20 @@ app.get('/:operator', (req, res, next) => {
         next(error);
     }
 });
-
+/**
+ * Root-Endpoint mit kurzer API-Übersicht.
+ * GET /
+ */
+app.get('/', (req, res) => {
+    res.status(200).json({
+        service: 'Taschenrechner-Server',
+        endpoints: {
+            health: 'GET /health',
+            calculate: 'POST /calculate  { "operator": "add", "a": 2, "b": 3 }',
+            shortcuts: 'GET /add|subtract|multiply|divide?a=2&b=3'
+        }
+    });
+});
 /**
  * 404-Handler für nicht existierende Routen.
  */
