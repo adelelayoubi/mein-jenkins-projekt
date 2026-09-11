@@ -23,9 +23,9 @@ pipeline {
             steps {
                 script {
                     // Alte Container stoppen und entfernen falls vorhanden
-                    sh 'docker compose down || true'
+                    sh 'docker compose down --remove-orphans || true'
                     // Neue Container im Hintergrund starten
-                    sh 'docker compose up -d'
+                    sh 'docker compose up -d --force-recreate'
                 }
             }
         }
