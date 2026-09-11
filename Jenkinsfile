@@ -1,26 +1,31 @@
 pipeline {
     agent any
+
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
-        stage('Docker Image bauen') {
+
+        stage('Docker Images bauen') {
             steps {
                 script {
-                    // Baut das Docker-Image und nutzt die Build-Nummer als Tag
-                    sh 'docker build -t meine-node-app:${BUILD_NUMBER} .'
+                    // Backend Image bauen
+                    sh 'docker build -t calculator-backend:latest ./backend'
+                    // Frontend Image bauen
+                    sh 'docker build -t calculator-frontend:latest ./frontend'
                 }
             }
         }
-        stage('Test / Ausführen') {
+
+        stage('Test / Ausführen mit Docker Compose') {
             steps {
                 script {
-                    // Alter Test-Container stoppen/löschen, falls er noch da ist
-                    sh 'docker rm -f test-container || true'
-                    // Startet das Image als Container auf Port 3000
-                    sh 'docker run -d -p 3000:3000 --name test-container meine-node-app:${BUILD_NUMBER}'
+                    // Alte Container stoppen und entfernen falls vorhanden
+                    sh 'docker compose down || true'
+                    // Neue Container im Hintergrund starten
+                    sh 'docker compose up -d'
                 }
             }
         }

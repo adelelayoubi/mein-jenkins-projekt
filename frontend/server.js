@@ -1,171 +1,24 @@
-/**
- * server.js
- *
- * Taschenrechner-Server (Calculator Server) mit grafischer Oberfläche
- *
- * Implementiert nach Java-ähnlichen Konventionen:
- *  - Klassenbasierte Kapselung der Geschäftslogik (CalculatorService)
- *  - Strenge Eingabevalidierung (Guard Clauses)
- *  - Zentrales Error-Handling (Middleware, vergleichbar mit @ExceptionHandler)
- *  - Konstanten in UPPER_CASE, explizite JSDoc-Typannotationen
- *
- * Laufzeit: Node.js + Express
- * Deployment: Docker / CI-CD Pipeline
- *
- * GET  /            -> GUI (HTML) mit Überschrift, Buttons, Ergebnis-Feld,
- *                       Größenänderung per Maus und letzter Berechnung
- * GET  /health      -> Health-Check für Docker
- * POST /calculate   -> Berechnungs-API (JSON)
- * GET  /:operator   -> Berechnungs-API Shortcut (JSON, Query-Params a, b)
- */
-
 'use strict';
 
 const express = require('express');
 
-/** @constant {number} DEFAULT_PORT - Standard-Port, falls keine ENV-Variable gesetzt ist */
+/** @constant {number} DEFAULT_PORT - Standard-Port für das Frontend */
 const DEFAULT_PORT = 3000;
-
-/** @constant {number} PORT - Tatsächlich verwendeter Port */
 const PORT = process.env.PORT || DEFAULT_PORT;
 
-/**
- * CalculatorService
- *
- * Kapselt die gesamte Rechenlogik analog zu einer Java-Service-Klasse
- * (z. B. @Service in Spring). Alle Methoden sind statisch, da kein
- * interner State gehalten wird.
- */
-class CalculatorService {
-    /**
-     * @param {number} a
-     * @param {number} b
-     * @returns {number}
-     */
-    static add(a, b) {
-        return a + b;
-    }
-
-    /**
-     * @param {number} a
-     * @param {number} b
-     * @returns {number}
-     */
-    static subtract(a, b) {
-        return a - b;
-    }
-
-    /**
-     * @param {number} a
-     * @param {number} b
-     * @returns {number}
-     */
-    static multiply(a, b) {
-        return a * b;
-    }
-
-    /**
-     * @param {number} a
-     * @param {number} b
-     * @returns {number}
-     * @throws {CalculationException} bei Division durch 0
-     */
-    static divide(a, b) {
-        if (b === 0) {
-            throw new CalculationException('Division durch 0 ist nicht erlaubt.');
-        }
-        return a / b;
-    }
-
-    /**
-     * Führt die Operation anhand des übergebenen Operator-Strings aus.
-     *
-     * @param {string} operator - einer von: add, subtract, multiply, divide
-     * @param {number} a
-     * @param {number} b
-     * @returns {number}
-     * @throws {CalculationException} bei unbekanntem Operator
-     */
-    static calculate(operator, a, b) {
-        switch (operator) {
-            case 'add':
-                return CalculatorService.add(a, b);
-            case 'subtract':
-                return CalculatorService.subtract(a, b);
-            case 'multiply':
-                return CalculatorService.multiply(a, b);
-            case 'divide':
-                return CalculatorService.divide(a, b);
-            default:
-                throw new CalculationException(`Unbekannter Operator: '${operator}'`);
-        }
-    }
-}
-
-/**
- * CalculationException
- *
- * Benutzerdefinierte Exception-Klasse, analog zu einer
- * checked/unchecked Exception in Java (extends RuntimeException).
- */
-class CalculationException extends Error {
-    /**
-     * @param {string} message
-     */
-    constructor(message) {
-        super(message);
-        this.name = 'CalculationException';
-        this.statusCode = 400;
-    }
-}
-
-/**
- * InputValidator
- *
- * Statische Hilfsklasse zur Validierung eingehender Request-Parameter.
- */
-class InputValidator {
-    /**
-     * @param {*} value
-     * @param {string} fieldName
-     * @returns {number}
-     * @throws {CalculationException}
-     */
-    static validateNumber(value, fieldName) {
-        const parsed = Number(value);
-        if (value === undefined || value === null || value === '' || Number.isNaN(parsed) || !Number.isFinite(parsed)) {
-            throw new CalculationException(`Ungültiger Wert für Parameter '${fieldName}': '${value}'`);
-        }
-        return parsed;
-    }
-
-    /**
-     * @param {*} operator
-     * @returns {string}
-     * @throws {CalculationException}
-     */
-    static validateOperator(operator) {
-        const SUPPORTED_OPERATORS = ['add', 'subtract', 'multiply', 'divide'];
-        if (!SUPPORTED_OPERATORS.includes(operator)) {
-            throw new CalculationException(
-                `Ungültiger Operator: '${operator}'. Erlaubt: ${SUPPORTED_OPERATORS.join(', ')}`
-            );
-        }
-        return operator;
-    }
-}
+// Die URL zum Backend: Im Docker-Netzwerk greifen wir direkt auf den Service-Namen "backend" zu.
+// Lokal ohne Docker fällt es auf localhost:5000 zurück.
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
 
 /* -----------------------------------------------------------------------
- * View-Layer: HTML/CSS/JS für die GUI als einzelner String.
- * (In Java wäre dies z. B. eine Thymeleaf-Template-Datei; hier aus
- * Gründen der Single-File-Vorgabe direkt im Server eingebettet.)
+ * View-Layer: HTML/CSS/JS für die GUI des Taschenrechners
  * --------------------------------------------------------------------- */
 
 const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>Taschenrechner</title>
+<title>Taschenrechner (Frontend-Backend Architektur)</title>
 <style>
   * { box-sizing: border-box; }
   html, body {
@@ -188,7 +41,6 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
     margin: 0;
     letter-spacing: 1px;
   }
-  /* Resizable Wrapper: per Maus an der unteren rechten Ecke ziehen */
   .calculator {
     position: relative;
     background: #1e1e1e;
@@ -286,7 +138,7 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <h1 id="app-title">Taschenrechner</h1>
+  <h1 id="app-title">Taschenrechner (Frontend)</h1>
 
   <div class="calculator" id="calculator">
     <div id="error-message"></div>
@@ -322,13 +174,6 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
   <div id="last-memory">Letzte Berechnung: <span id="last-memory-value">–</span></div>
 
 <script>
-  /**
-   * Calculator (Frontend-Controller)
-   *
-   * Kapselt den GUI-State und kommuniziert mit dem Backend
-   * über den /calculate Endpoint. Aufbau angelehnt an eine
-   * Java-Controller-Klasse mit gekapseltem State.
-   */
   const Calculator = (() => {
       const OPERATOR_SYMBOLS = {
           add: '+',
@@ -403,7 +248,8 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
           const expressionText = pendingOperand + ' ' + OPERATOR_SYMBOLS[pendingOperator] + ' ' + secondOperand;
 
           try {
-              const response = await fetch('/calculate', {
+              // WICHTIG: Das Frontend schickt den API-Request an den Backend-Endpunkt
+              const response = await fetch('/api/calculate', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -433,13 +279,6 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
       return { appendDigit, backspace, clear, setOperator, evaluate };
   })();
 
-  /**
-   * ResizeScaler
-   *
-   * Beobachtet die per Maus veränderte Größe des Taschenrechners
-   * (CSS resize: both) und skaliert Schriftgrößen proportional mit,
-   * damit Buttons und Anzeige beim Vergrößern/Verkleinern mitwachsen.
-   */
   (function initResizeScaler() {
       const calculatorElement = document.getElementById('calculator');
       const resultField = document.getElementById('result-field');
@@ -462,103 +301,40 @@ const CALCULATOR_HTML_PAGE = `<!DOCTYPE html>
 </html>`;
 
 /* -----------------------------------------------------------------------
- * Express-Anwendung / Controller-Layer (analog zu @RestController in Java)
+ * Express Server Setup für das Frontend
  * --------------------------------------------------------------------- */
 
 const app = express();
 app.use(express.json());
 
-/**
- * GUI-Endpoint: liefert die HTML-Oberfläche des Taschenrechners aus.
- * GET /
- */
+// 1. Liefert die HTML-Oberfläche an den Browser aus
 app.get('/', (req, res) => {
     res.status(200).type('html').send(CALCULATOR_HTML_PAGE);
 });
 
-/**
- * Health-Check-Endpoint.
- * GET /health
- */
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'UP' });
-});
-
-/**
- * Haupt-Endpoint für Berechnungen.
- * POST /calculate
- * Body: { "operator": "add" | "subtract" | "multiply" | "divide", "a": number, "b": number }
- */
-app.post('/calculate', (req, res, next) => {
+// 2. Server-to-Server Proxy/Weiterleitung: 
+// Nimmt den Request vom Browser entgegen und leitet ihn intern an das Backend im Docker-Netzwerk weiter
+app.post('/api/calculate', async (req, res) => {
     try {
-        const { operator, a, b } = req.body;
-
-        const validatedOperator = InputValidator.validateOperator(operator);
-        const numberA = InputValidator.validateNumber(a, 'a');
-        const numberB = InputValidator.validateNumber(b, 'b');
-
-        const result = CalculatorService.calculate(validatedOperator, numberA, numberB);
-
-        res.status(200).json({
-            operator: validatedOperator,
-            a: numberA,
-            b: numberB,
-            result
+        const backendResponse = await fetch(`${BACKEND_URL}/calculate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body)
         });
+
+        const data = await backendResponse.json();
+        
+        if (!backendResponse.ok) {
+            return res.status(backendResponse.status).json(data);
+        }
+
+        res.status(200).json(data);
     } catch (error) {
-        next(error);
+        console.error('Fehler bei der Kommunikation mit dem Backend:', error.message);
+        res.status(500).json({ error: 'Verbindung zum Backend fehlgeschlagen.' });
     }
 });
 
-/**
- * Bequemlichkeits-Endpoint via GET, z. B. /add?a=2&b=3
- * Analog zu zusätzlichen @GetMapping-Routen in Java.
- */
-app.get('/:operator', (req, res, next) => {
-    try {
-        const { operator } = req.params;
-        const { a, b } = req.query;
-
-        const validatedOperator = InputValidator.validateOperator(operator);
-        const numberA = InputValidator.validateNumber(a, 'a');
-        const numberB = InputValidator.validateNumber(b, 'b');
-
-        const result = CalculatorService.calculate(validatedOperator, numberA, numberB);
-
-        res.status(200).json({
-            operator: validatedOperator,
-            a: numberA,
-            b: numberB,
-            result
-        });
-    } catch (error) {
-        next(error);
-    }
-});
-
-/**
- * 404-Handler für nicht existierende Routen.
- */
-app.use((req, res) => {
-    res.status(404).json({ error: 'Route nicht gefunden.' });
-});
-
-/**
- * Zentrales Error-Handling-Middleware.
- * Analog zu @ExceptionHandler / @ControllerAdvice in Java/Spring.
- */
-app.use((error, req, res, next) => {
-    const statusCode = error.statusCode || 500;
-    const message = statusCode === 500 ? 'Interner Serverfehler.' : error.message;
-    res.status(statusCode).json({ error: message });
-});
-
-/**
- * Startet den Server.
- * Wird beim Container-Start (Docker/CI-CD) direkt ausgeführt.
- */
 app.listen(PORT, () => {
-    console.log(`Taschenrechner-Server läuft auf Port ${PORT}`);
+    console.log(`Frontend-Server läuft auf Port ${PORT} und verbindet sich mit Backend unter ${BACKEND_URL}`);
 });
-
-module.exports = app;

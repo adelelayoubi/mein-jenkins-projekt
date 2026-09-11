@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: calculator-backend
+    ports:
+      - "5000:5000"
+    networks:
+      - app-net
+
+  frontend:
+    build: ./frontend
+    container_name: calculator-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
